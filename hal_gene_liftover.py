@@ -44,6 +44,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, Generator, Iterable, List, Mapping, Tuple, Union
 
 from Bio.SeqIO.FastaIO import SimpleFastaParser
+from multiprocessing import Pool
 
 
 @dataclass(frozen=True)
@@ -370,7 +371,6 @@ def liftover_via_hal(src_region: SimpleRegion, src_genome: str, src_2bit_file: U
     with TemporaryDirectory() as tmp_dir:
 
         src_bed_file = os.path.join(tmp_dir, 'src_regions.bed')
-        src_bed_file = "src_regions.bed"
         make_src_region_file([src_region], src_genome, src_chr_sizes, src_bed_file,
                              flank_length=flank_length)
 
@@ -682,6 +682,7 @@ if __name__ == '__main__':
     parser.add_argument('--alt-synonym-json', metavar='FILE',
                         help="Input JSON file with, for each genome in the HAL file, a one-to-one mapping"
                              " between each chromosome name and its alternative synonym in the HAL file.")
+    parser.add_argument('-T','--threads', metavar = 'INT', default = 16, help = "Number of threads used")
     args = parser.parse_args()
 
     if args.hal_aux_dir is not None:
@@ -729,17 +730,25 @@ if __name__ == '__main__':
                             destination_2bit_file, args.hal_file, cached_chain_file,
                             linear_gap=args.linear_gap)
 
-    records = []
-    for source_region in source_regions:
+
+    def liftover(source_region):
         if args.cache_chain:
-            record = liftover_via_chain(source_region, args.src_genome, source_chr_sizes, args.dest_genome,
-                                        destination_2bit_file, cached_chain_file, flank_length=args.flank)
+            return liftover_via_chain(
+                source_region,
+                args.src_genome,
+                source_chr_sizes,
+                args.dest_genome,
+                destination_2bit_file,
+                cached_chain_file,
+                flank_length=args.flank
+            )
         else:
-            record = liftover_via_hal(source_region, args.src_genome, source_2bit_file, source_chr_sizes,
-                                       args.dest_genome, destination_2bit_file, args.hal_file,
-                                       flank_length=args.flank, skip_chain=args.skip_chain,
-                                       linear_gap=args.linear_gap)
-        records.append(record)
+            return liftover_via_hal(source_region, args.src_genome, source_2bit_file, source_chr_sizes, args.dest_genome, destination_2bit_file, args.hal_file,
+                                        flank_length=args.flank, skip_chain=args.skip_chain,
+                                        linear_gap=args.linear_gap)
+
+    with Pool(args.threads) as pool:
+        records = pool.map(liftover, source_regions)
 
     if args.alt_synonym_json is not None:
         for record in records:
