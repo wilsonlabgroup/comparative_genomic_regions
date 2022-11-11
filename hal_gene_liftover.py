@@ -45,6 +45,8 @@ from typing import Any, Dict, Generator, Iterable, List, Mapping, Tuple, Union
 
 from Bio.SeqIO.FastaIO import SimpleFastaParser
 from multiprocessing import Pool
+import random
+import string
 
 
 @dataclass(frozen=True)
@@ -255,21 +257,24 @@ def extract_region_sequences(regions: Iterable[SimpleRegion],
         List of region sequences.
 
     """
-    with TemporaryDirectory() as tmp_dir:
 
-        chain_bed_file = os.path.join(tmp_dir, 'chain.bed')
-        with open(chain_bed_file, 'w') as f:
-            for idx, region in enumerate(regions):
-                fields = [region.chr, region.start, region.end, idx, 0, region.strand]
-                print('\t'.join(str(x) for x in fields), file=f)
+    tmp_dir = os.path.join(os.getenv('SCRATCH'), "".join(random.choice(string.ascii_letters) for x in range(6)))
 
-        chain_fasta_file = os.path.join(tmp_dir, 'chain.fa')
-        run_two_bit_to_fa(chain_bed_file, two_bit_file, chain_fasta_file)
+    chain_bed_file = tmp_dir + 'chain.bed'
+    with open(chain_bed_file, 'w') as f:
+        for idx, region in enumerate(regions):
+            fields = [region.chr, region.start, region.end, idx, 0, region.strand]
+            print('\t'.join(str(x) for x in fields), file=f)
 
-        with open(chain_fasta_file) as f:
-            sequences = [seq for _, seq in SimpleFastaParser(f)]
+    chain_fasta_file = tmp_dir + 'chain.fa'
+    run_two_bit_to_fa(chain_bed_file, two_bit_file, chain_fasta_file)
 
-    return sequences
+    with open(chain_fasta_file) as f:
+        sequences = [seq for _, seq in SimpleFastaParser(f)]
+    
+    return sequences 
+
+
 
 
 def liftover_via_chain(src_region: SimpleRegion, src_genome: str, src_chr_sizes: Dict[str, int],
@@ -304,30 +309,31 @@ def liftover_via_chain(src_region: SimpleRegion, src_genome: str, src_chr_sizes:
     }
 
     rec['results'] = []
-    with TemporaryDirectory() as tmp_dir:
+    
+    tmp_dir = os.path.join(os.getenv('SCRATCH'), "".join(random.choice(string.ascii_letters) for x in range(6)))
 
-        src_bed_file = os.path.join(tmp_dir, 'src_regions.bed')
-        make_src_region_file([src_region], src_genome, src_chr_sizes, src_bed_file,
-                             flank_length=flank_length)
+    src_bed_file = tmp_dir + 'src_regions.bed'
+    make_src_region_file([src_region], src_genome, src_chr_sizes, src_bed_file,
+                            flank_length=flank_length)
 
-        dst_bed_file = os.path.join(tmp_dir, 'dst_regions.bed')
-        run(['liftOver', '-multiple', src_bed_file, chain_file, dst_bed_file, os.devnull], check=True)
+    dst_bed_file = tmp_dir + 'dst_regions.bed'
+    run(['liftOver', '-multiple', src_bed_file, chain_file, dst_bed_file, os.devnull], check=True)
 
-        dst_regions = extract_liftover_regions_from_bed(dst_bed_file)
+    dst_regions = extract_liftover_regions_from_bed(dst_bed_file)
 
-        if dst_regions:
-            return rec
+    if dst_regions:
+        return rec
 
-        dst_sequences = extract_region_sequences(dst_regions, dst_2bit_file)
+    dst_sequences = extract_region_sequences(dst_regions, dst_2bit_file)
 
-        for dst_region, dst_sequence in zip(dst_regions, dst_sequences):
-            rec['results'].append({
-                'dest_chr': dst_region.chr,
-                'dest_start': dst_region.start + 1,
-                'dest_end': dst_region.end,
-                'dest_strand': _strand_sign_to_num[dst_region.strand],
-                'dest_sequence': dst_sequence
-            })
+    for dst_region, dst_sequence in zip(dst_regions, dst_sequences):
+        rec['results'].append({
+            'dest_chr': dst_region.chr,
+            'dest_start': dst_region.start + 1,
+            'dest_end': dst_region.end,
+            'dest_strand': _strand_sign_to_num[dst_region.strand],
+            'dest_sequence': dst_sequence
+        })
 
     return rec
 
@@ -368,44 +374,47 @@ def liftover_via_hal(src_region: SimpleRegion, src_genome: str, src_2bit_file: U
     }
 
     rec['results'] = []
-    with TemporaryDirectory() as tmp_dir:
+    
 
-        src_bed_file = os.path.join(tmp_dir, 'src_regions.bed')
-        make_src_region_file([src_region], src_genome, src_chr_sizes, src_bed_file,
-                             flank_length=flank_length)
+    tmp_dir = os.path.join(os.getenv('SCRATCH'), "".join(random.choice(string.ascii_letters) for x in range(6)))
+    
+    src_bed_file = tmp_dir + 'src_regions.bed'
+    make_src_region_file([src_region], src_genome, src_chr_sizes, src_bed_file,
+                            flank_length=flank_length)
 
-        psl_file = os.path.join(tmp_dir, 'alignment.psl')
-        run_hal_liftover(hal_file, src_genome, src_bed_file, dest_genome, psl_file)
+    psl_file = tmp_dir + 'alignment.psl'
+    run_hal_liftover(hal_file, src_genome, src_bed_file, dest_genome, psl_file)
 
-        if os.path.getsize(psl_file) == 0:
-            return rec
+    if os.path.getsize(psl_file) == 0:
+        return rec
 
-        chain_file = os.path.join(tmp_dir, 'alignment.chain')
-        if skip_chain:
-            run_psl_to_chain(psl_file, chain_file)
-        else:
-            run_axt_chain(psl_file, src_2bit_file, dest_2bit_file, chain_file, linear_gap=linear_gap)
+    chain_file = tmp_dir + 'alignment.chain'
 
-        lifted_src_regions, dest_regions = extract_liftover_regions_from_chain(src_region, chain_file)
+    if skip_chain:
+        run_psl_to_chain(psl_file, chain_file)
+    else:
+        run_axt_chain(psl_file, src_2bit_file, dest_2bit_file, chain_file, linear_gap=linear_gap)
 
-        if not dest_regions:
-            return rec
+    lifted_src_regions, dest_regions = extract_liftover_regions_from_chain(src_region, chain_file)
 
-        dest_sequences = extract_region_sequences(dest_regions, dest_2bit_file)
+    if not dest_regions:
+        return rec
 
-        for lifted_src_region, dest_region, dest_sequence in zip(lifted_src_regions, dest_regions,
-                                                                 dest_sequences):
-            rec['results'].append({
-                'lifted_src_chr': lifted_src_region.chr,
-                'lifted_src_start': lifted_src_region.start + 1,
-                'lifted_src_end': lifted_src_region.end,
-                'lifted_src_strand': _strand_sign_to_num[src_region.strand],
-                'dest_chr': dest_region.chr,
-                'dest_start': dest_region.start + 1,
-                'dest_end': dest_region.end,
-                'dest_strand': _strand_sign_to_num[dest_region.strand],
-                'dest_sequence': dest_sequence
-            })
+    dest_sequences = extract_region_sequences(dest_regions, dest_2bit_file)
+
+    for lifted_src_region, dest_region, dest_sequence in zip(lifted_src_regions, dest_regions,
+                                                                dest_sequences):
+        rec['results'].append({
+            'lifted_src_chr': lifted_src_region.chr,
+            'lifted_src_start': lifted_src_region.start + 1,
+            'lifted_src_end': lifted_src_region.end,
+            'lifted_src_strand': _strand_sign_to_num[src_region.strand],
+            'dest_chr': dest_region.chr,
+            'dest_start': dest_region.start + 1,
+            'dest_end': dest_region.end,
+            'dest_strand': _strand_sign_to_num[dest_region.strand],
+            'dest_sequence': dest_sequence
+        })
 
     return rec
 
@@ -485,18 +494,18 @@ def make_chain_file(src_genome: str, src_2bit_file: Union[Path, str], src_chr_si
     """
     src_regions = [SimpleRegion(k, 0, x, '+') for k, x in src_chr_sizes.items()]
 
-    with TemporaryDirectory() as tmp_dir:
+    tmp_dir = os.path.join(os.getenv('SCRATCH'), "".join(random.choice(string.ascii_letters) for x in range(6)))
 
-        src_bed_file = os.path.join(tmp_dir, 'src_regions.bed')
-        make_src_region_file(src_regions, src_genome, src_chr_sizes, src_bed_file)
+    src_bed_file = tmp_dir + 'src_regions.bed'
+    make_src_region_file(src_regions, src_genome, src_chr_sizes, src_bed_file)
 
-        tmp_psl_file = os.path.join(tmp_dir, 'alignment.psl')
-        run_hal_liftover(hal_file, src_genome, src_bed_file, dst_genome, tmp_psl_file)
+    tmp_psl_file = tmp_dir + 'alignment.psl'
+    run_hal_liftover(hal_file, src_genome, src_bed_file, dst_genome, tmp_psl_file)
 
-        tmp_chain_file = os.path.join(tmp_dir, 'alignment.chain')
-        run_axt_chain(tmp_psl_file, src_2bit_file, dst_2bit_file, tmp_chain_file, linear_gap=linear_gap)
+    tmp_chain_file = tmp_dir + 'alignment.chain'
+    run_axt_chain(tmp_psl_file, src_2bit_file, dst_2bit_file, tmp_chain_file, linear_gap=linear_gap)
 
-        shutil.move(tmp_chain_file, chain_file)
+    shutil.move(tmp_chain_file, chain_file)
 
 
 def make_src_region_file(regions: Iterable[SimpleRegion], genome: str, chr_sizes: Mapping[str, int],
@@ -682,7 +691,7 @@ if __name__ == '__main__':
     parser.add_argument('--alt-synonym-json', metavar='FILE',
                         help="Input JSON file with, for each genome in the HAL file, a one-to-one mapping"
                              " between each chromosome name and its alternative synonym in the HAL file.")
-    parser.add_argument('-T','--threads', metavar = 'INT', default = 16, help = "Number of threads used")
+    parser.add_argument('-T','--threads', metavar = 'INT', type = int, default = 16, help = "Number of threads used")
     args = parser.parse_args()
 
     if args.hal_aux_dir is not None:
