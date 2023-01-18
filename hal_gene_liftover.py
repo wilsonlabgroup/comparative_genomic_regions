@@ -611,7 +611,10 @@ def run_hal_liftover(hal_file: Union[Path, str], src_genome: str,
         RuntimeError: If halLiftover or pslPosTarget have nonzero return code.
 
     """
-    cmd1 = ['halLiftover', '--outPSL', hal_file, src_genome, bed_file, dest_genome, 'stdout']
+    if args.in_memory:
+        cmd1 = ['halLiftover', '--outPSL', hal_file, src_genome, bed_file, dest_genome, 'stdout']
+    else:
+        cmd1 = ['halLiftover', '--outPSL --inMemory', hal_file, src_genome, bed_file, dest_genome, 'stdout']
     cmd2 = ['pslPosTarget', 'stdin', psl_file]
     with Popen(cmd1, stdout=PIPE) as p1:
         with Popen(cmd2, stdin=p1.stdout) as p2:
@@ -692,6 +695,7 @@ if __name__ == '__main__':
                         help="Input JSON file with, for each genome in the HAL file, a one-to-one mapping"
                              " between each chromosome name and its alternative synonym in the HAL file.")
     parser.add_argument('-T','--threads', metavar = 'INT', type = int, default = 16, help = "Number of threads used")
+    parser.add_argument('--in_memory', action='store_true', help = "If set 'inMemory' for halLiftover")
     args = parser.parse_args()
 
     if args.hal_aux_dir is not None:
