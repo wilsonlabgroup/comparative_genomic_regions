@@ -5,6 +5,9 @@ species1=$2
 species2=$3
 submit=$4
 
+mkdir -p $species1"-to-"$species2
+cd $species1"-to-"$species2
+
 # get bed file
 halStats --bedSequences $species1 $halfile > $species1".bed"
 
@@ -32,5 +35,5 @@ echo $submit
 if [ $submit == "T" ]
 then
     
-    queue_commands_slurm.py -i $species1_"halliftover_cmds" -p $job_prefix"hal" -qsub_memory 30g -t 20:00:00 
+    queue_commands_slurm.py -i $species1_"halliftover_cmds" -p $job_prefix"hal" -qsub_memory 50g -t 30:00:00 
 fi
