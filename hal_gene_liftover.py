@@ -611,10 +611,10 @@ def run_hal_liftover(hal_file: Union[Path, str], src_genome: str,
         RuntimeError: If halLiftover or pslPosTarget have nonzero return code.
 
     """
-    if args.in_memory:
+    if not args.in_memory:
         cmd1 = ['halLiftover', '--outPSL', hal_file, src_genome, bed_file, dest_genome, 'stdout']
     else:
-        cmd1 = ['halLiftover', '--outPSL --inMemory', hal_file, src_genome, bed_file, dest_genome, 'stdout']
+        cmd1 = ['halLiftover', '--outPSL', '--inMemory', hal_file, src_genome, bed_file, dest_genome, 'stdout']
     cmd2 = ['pslPosTarget', 'stdin', psl_file]
     with Popen(cmd1, stdout=PIPE) as p1:
         with Popen(cmd2, stdin=p1.stdout) as p2:
