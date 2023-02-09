@@ -23,7 +23,7 @@
 # make script work for both compara and halLiftover output
 
 # TODO:
-# make script work for liftover and halper results (same format)
+# deal with paralogs
 # implement peak overlap by percentage -- for hal liftover also consider proportion of peak lifted over? -- preserve lifted regions in intermediate output?
 # filter out fragmented alignment? -- solved by HALPER
 
@@ -42,12 +42,13 @@ option_list <- list(
   make_option(c("-m","--maxmin"), default = "0:1", help="Maxgap:Mininum overlap between orthologous regions and peaks, in bp [default %(default)s]"),
   make_option(c("-s", "--stitchbp"),type="integer", default=2, 
               help="Stitching orthologous regions within how many bps [default %(default)s]"),
-  make_option("--mode", default = "L", help= "matchType: one of L|P|S (P by default) for Legacy Permissive or Strict matching"),
+  make_option("--mode", default = "L", help= "matchType: one of L|P|S (P by default) for Legacy, Permissive, or Strict matching"),
   make_option(c("-p", "--return-num-paralogs"), action = "store_true", default = FALSE,
               help = "If to return the number of paralogous regions"),
   make_option(c("-t", "--threads"), default = 4,
               help = "number of threads to use"),
-  make_option("--type", default = "hal", help = "Which alignment was used to generate the orthologs regions. Choose from 'hal','compara', and 'ucsc'. Default is 'hal'")
+  make_option("--type", default = "hal", help = "Which alignment was used to generate the orthologs regions. Choose from 'hal','compara', and 'ucsc'. Default is 'hal'"),
+  make_option("--label",default = "", help = "Additional text labels to add to output files")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
@@ -84,6 +85,7 @@ if(!alignment_type %in% c("hal","compara","ucsc")){
 
 # for testing -------------------------------------------------------------
 # input_file <- "/mnt/mdwilson/huayun/others/hal_vs_epo/hal_zoonomia/rela/rscript_input.txt"
+# alignment_type <- "hal"
 # 
 # tf <- "rela"
 # stitchbp <- 2
@@ -92,10 +94,12 @@ if(!alignment_type %in% c("hal","compara","ucsc")){
 # threads <- 2
 # return_num_paralogs <- F
 # matchType <- "S"
-# alignment_type <- "hal"
-# 
+#  
 # input_file <- "/mnt/mdwilson/huayun/collabs/rela/rela_compara_102/rela/rscript_input.txt"
 # alignment_type <- "compara"
+# 
+# input_file <- "/mnt/mdwilson/huayun/others/hal_vs_epo/liftover/rela_rscript_input.txt"
+# alignment_type <- "ucsc"
 
 # Output argument 
 print(args)
@@ -107,7 +111,7 @@ file_table <- read.table(input_file, stringsAsFactors=FALSE) ## Read in table ge
 # depends on which alignment was used, set colnames for input file and extract species
 if(alignment_type == "compara"){
   colnames(file_table) <- c("target_species","lifted_res","original_peak")
-} else if(alignment_type == "hal"){
+} else{
   colnames(file_table) <- c("target_species", "other_species", "lifted_res", "original_peak")
 }
 
@@ -115,8 +119,8 @@ species_list <- unique(file_table$target_species)
 
 
 # for testing
-#file_table$lifted_res <- gsub("home/huayun|hpf/largeprojects","mnt", file_table$lifted_res)
-#file_table$original_peak <- gsub("home/huayun|hpf/largeprojects","mnt", file_table$original_peak)
+# file_table$lifted_res <- gsub("home/huayun|hpf/largeprojects","mnt", file_table$lifted_res)
+# file_table$original_peak <- gsub("home/huayun|hpf/largeprojects","mnt", file_table$original_peak)
 
 # functions ---------------------------------------------------------------
 find_common <- function(x, y){
@@ -207,6 +211,10 @@ original_peaks <- lapply(species_list, function(anchor_species){ ## Read in orig
   } else if(alignment_type == "compara"){
     # if compara, make original peaks into chr.start.end format to match with compara output style
     peaks$oriPeak <- with(peaks, paste0(seqnames,".", start, ".", end))
+  } else if(alignment_type == "ucsc"){
+    # if ucsc, assumes peak name is the forth column, preserve peaknames
+    colnames(peaks)[colnames(peaks) == "oriPeak"] <- "peakname"
+    peaks$oriPeak <- with(peaks, paste0(seqnames,":", start, "-", end))
   }
   peaks$oriPeak <- paste0(anchor_species, ".", peaks$oriPeak)
   peak.ranges <- makeGRangesFromDataFrame(peaks, keep.extra.columns = T)
@@ -264,13 +272,44 @@ read_res_from_hal <- function(anchor_species){
   return(hal_other_species_process_out)
 }
 
+read_res_from_ucsc <- function(anchor_species){
+  # this function reads output of UCSC liftover or HALPER when peaks from the anchor species is lifted over to other species
+  # one output file per other species
+  print(paste("Processing UCSC/HALPER liftover Regions for:", anchor_species))
+  other_species_list <- species_list[species_list != anchor_species]
   
-# read peak liftover results 
+  # Process all the liftover results for the anchor species
+  hal_other_species_process_out <- lapply(other_species_list, function(query_species){
+    print(query_species)
+    liftover_file <- subset(file_table, target_species == anchor_species & other_species == query_species)$lifted_res
+    if(!file.exists(liftover_file)){
+      stop(paste("liftover result file", liftover_file, "does not exist"))
+    } else{
+      anchor_peaks <- as.data.frame(original_peaks[[anchor_species]]) %>% 
+        dplyr::select(peakname, anchor_oriPeak = oriPeak)
+      lift <- read.table(liftover_file, stringsAsFactors = F, as.is = T)[,1:4] %>% 
+        setNames(c("seqnames","start","end","peakname")) %>%
+        left_join(anchor_peaks, by = "peakname") %>% 
+        dplyr::select(-peakname)
+  
+      return(regions_to_grlist_hal(lift, query_species))
+    }
+  })
+  names(hal_other_species_process_out) <- other_species_list
+  return(hal_other_species_process_out)
+}
+
+
+
+  # read peak liftover results 
 if(alignment_type == "compara"){
   lifted_list <- mclapply(species_list, read_res_from_compara, mc.cores = threads) 
 } else if(alignment_type == "hal"){
   lifted_list <- mclapply(species_list, read_res_from_hal, mc.cores = threads) 
+} else if(alignment_type == "ucsc"){
+    lifted_list <- mclapply(species_list, read_res_from_ucsc, mc.cores = threads) 
 }
+
 names(lifted_list) <- species_list
 
 
@@ -333,7 +372,7 @@ match_pair_species <- function(anchor_species, query_species){
   
   # construct the string encoding conservation status
   
- if(alignment_type == "hal"){
+ if(alignment_type == "hal"|alignment_type == "ucsc"){
    # if based on hal alignment, initiate an empty string. Peaks with ortho region in query species are labeled with 0, without ortho regions: X
    conserved_pks$out <- "X"
    conserved_pks$out[conserved_pks$oriPeak %in% names(lifted_list[[anchor_species]][[query_species]]$ortho_regions)] <- "0"
@@ -345,33 +384,11 @@ match_pair_species <- function(anchor_species, query_species){
    #out <- lifted_list[[anchor_species]][[query_species]]$out
    out <- lifted_list[[anchor_species]][[query_species]]$out
    out[!out %in% c("X", "G")] <- "0"
-   # If the "lifted over" regions overlap with anchor species peaks, label it with 1. 
-   out[conserved_pks$queryHits] <- "1"
+   # If the "lifted over" regions overlap with anchor species peaks, label it with 1.
+   temp <- conserved_pks[!is.na(conserved_pks[, query_species]), "oriPeak"]
+   out[temp] <- "1"
    
    conserved_pks[, paste0(query_species, "_conStatus")] <- out[conserved_pks$oriPeak]
-   
-   # 
-   # 
-   # # For conserved peaks in the "other species", record the number of paralogous regions
-   # conserved_pks$num_paralogs <- lifted_list[[query_species]][[anchor_species]]$out[conserved_pks$oriPeak]
-   # 
-   # # construct the final output
-   # species_con_out <- as.data.frame(anchor_species_ori_peaks)["oriPeak"] %>% 
-   #   mutate(index = seq(1:nrow(.)))
-   # # create a temp column with matching format of peak coordinates: chr.start.end
-   # species_con_out$tempcol <- gsub(":|-","\\.",gsub("chr","", species_con_out$oriPeak))
-   # out_df <- enframe(out)
-   # species_con_out <- left_join(species_con_out, out_df, by = c("tempcol"="name")) %>% 
-   #   #bind_cols(., out = out) %>% 
-   #   left_join(conserved_pks, by = c("index" = "queryHits")) %>%
-   #   rename(ori_peak = oriPeak.x, matched_peaks = oriPeak.y) %>% 
-   #   dplyr::select(-index, -tempcol) %>% 
-   #   group_by(ori_peak) %>% 
-   #   summarise(out = unique(value), matched_peaks = paste(unique(matched_peaks), collapse = ";"), num_paralogs = paste(unique(num_paralogs), collapse = ";")) %>% 
-   #   setNames(.,c("oriPeak",
-   #                paste0(query_species, "_conStatus"),
-   #                query_species,
-   #                paste0("num_paralogs_", query_species)))  
 
  }
   return(conserved_pks)
@@ -389,7 +406,7 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
   # process each "other species"
   match_one_species <- mclapply(other_species_list, function(query_species) match_pair_species(anchor_species, query_species), mc.cores = threads)
   match_one_species_out <- match_one_species %>% 
-    reduce(left_join, by = "oriPeak") %>% 
+    purrr::reduce(left_join, by = "oriPeak") %>% 
     unite("conservation", ends_with("_conStatus"), sep = "") %>% 
     separate(oriPeak, sep = "([\\.\\:\\-])", into = c(NA, "seqnames", "start", "end")) %>% 
     dplyr::select(seqnames, start, end, conservation, !!other_species_list, everything())
@@ -400,7 +417,7 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
   }
   
   write.table(x=match_one_species_out,
-              file=paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_",alignment_type,"_",matchType,".txt"),
+              file=paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_",alignment_type,"_",matchType, args$label,".txt"),
               row.names=F, quote=F, sep="\t")
   
   return(match_one_species_out)
@@ -408,4 +425,4 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
 names(compara_matched_list) <- species_list
 
 # Save R data
-save.image(paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type,"_", matchType, "_peakConservation.RData"))
+save.image(paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type,"_", matchType,args$label, "_peakConservation.RData"))
