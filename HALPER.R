@@ -55,7 +55,7 @@ PROTECT_DIST <- args$protect_dist
 # PROTECT_DIST <- 25
 
 # read in files
-summits <- read.table(sFile, sep = "\t", col.names = c("seqnames","start","end","summit_peakname"))
+summits <- read.table(sFile, sep = "\t")[,1:4] %>% setNames(c("seqnames","start","end","summit_peakname"))
 targets <- read.table(tFile, sep = "\t", col.names = c("seqnames","start","end","mapped_peakname"))
 peaks <- read.table(qFile, sep = "\t", col.names = c("seqnames","start","end","peakname"))
 
