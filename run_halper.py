@@ -31,7 +31,7 @@ def gen_summit_file(input):
 
     if not os.path.isfile(summit_file):
         # if summit file does not already exist
-        print("Generating summit file")
+        print("Generating summit file", file = sys.stderr)
         # read one line and count number of columns
         with open(input) as f:
             line = f.readline().split("\t")
