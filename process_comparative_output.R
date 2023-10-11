@@ -204,7 +204,7 @@ regions_to_grlist_compara <- function(region_df){
 
 original_peaks <- lapply(species_list, function(anchor_species){ ## Read in original peak file. Order is the same as in the compara_regions file
   print(paste0("Reading original peaks for: ", anchor_species))
-  peaks <- read.table(unique(subset(file_table, target_species == anchor_species)$original_peak), col.names = c("seqnames", "start", "end", "oriPeak")) 
+  peaks <- read.table(unique(subset(file_table, target_species == anchor_species)$original_peak))[,1:4] %>%  setNames(c("seqnames", "start", "end", "oriPeak")) 
   if(alignment_type == "hal"){
     peaks <- peaks[-1,]
     peaks$oriPeak <- with(peaks, paste0(seqnames,":", start, "-", end))
@@ -287,7 +287,14 @@ read_res_from_ucsc <- function(anchor_species){
     } else{
       anchor_peaks <- as.data.frame(original_peaks[[anchor_species]]) %>% 
         dplyr::select(peakname, anchor_oriPeak = oriPeak)
-      lift <- read.table(liftover_file, stringsAsFactors = F, as.is = T)[,1:4] %>% 
+      lift <- read.table(liftover_file, stringsAsFactors = F, as.is = T)
+      if(ncol(lift) > 5){
+        # if its result from halper
+        lift <- lift[,c(1:3, 5)]              
+        } else{
+          lift <- lift[,1:4]
+          }
+      lift <- lift %>% 
         setNames(c("seqnames","start","end","peakname")) %>%
         left_join(anchor_peaks, by = "peakname") %>% 
         dplyr::select(-peakname)
