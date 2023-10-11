@@ -79,9 +79,17 @@ targets_gr_list <- split(targets_gr, factor(targets_gr$mapped_peakname))
 # every mapped summit will correspond to a mapped region by default
 # go through summit regions one by one
 
-chain_ortho_region <- function(summit_used){
- # print(summit_used)
-  width <- peak_width[[summit_used$summit_peakname]]
+chain_ortho_region <- function(peak_used, summit = TRUE){
+  # if its summit, input 'peak_used' is a line from mapped summit file; if 
+  if(summit){
+    peakname <- peak_used$summit_peakname
+  } else{
+    #peakname <- unlist(strsplit(peak_used,"-"))[1]
+    peakname <- peak_used$mapped_peakname[1]
+  }
+  width <- peak_width[[peakname]]
+  
+  print(peakname)
   
   if(!is.null(MAX_FRAC)){
     max_len <- width * MAX_FRAC
@@ -95,36 +103,64 @@ chain_ortho_region <- function(summit_used){
     min_len <- MIN_LEN
   }
   
-  summit_used <- makeGRangesFromDataFrame(summit_used, keep.extra.columns = T)
-  summit_extended <- resize(summit_used, width = 2*max_len, fix = "center")
+  # get a grange of fragments to be chained 
+  if(summit){
+    summit_used <- makeGRangesFromDataFrame(peak_used, keep.extra.columns = T)
+    summit_extended <- resize(summit_used, width = 2*max_len, fix = "center")
+    
+    fragments <- GenomicRanges::reduce(targets_gr_list[[peak_used$summit_peakname]]) # merge adjacent fragments
+    fragments <- sort(subsetByOverlaps(fragments, summit_extended)) # filter for only fragments that are on the same chromosome as the mapped summit, always sort by chromosome coordinates
+    
+    ol <- findOverlaps(fragments, summit_used)  # find the fragment the summit maps to
+    start_index <- from(ol) # starting from the fragment that summit maps to
+  } else{
+      # input is multiple fragments mapped from a peak
+    
+      fragments <- GenomicRanges::reduce(peak_used)
+    
+      start_index <- which.max(width(fragments)) # get longest fragment and use it as an anchor
+      longest_extended <- resize(fragments[start_index], width = 2*max_len, fix = "center")
+      fragments <- sort(subsetByOverlaps(fragments, longest_extended))
+      start_index <- which.max(width(fragments)) # get index for longest fragment again
+  }
   
-  fragments <- GenomicRanges::reduce(targets_gr_list[[summit_used$summit_peakname]]) # merge adjacent fragments
-  fragments <- sort(subsetByOverlaps(fragments, summit_extended)) # filter for only fragments that are on the same chromosome as the mapped summit, always sort by chromosome coordinates
-  
-  ol <- findOverlaps(fragments, summit_used)  # find the fragment the summit maps to
-  start_index <- from(ol) # starting from the fragment that summit maps to
   
   get_length <- function(left, right){
     # given fragments, left and right index, calculate length of chained regions
     new_start <- start(fragments[left])
     new_end <- end(fragments[right])
     width <- new_end - new_start
-    summit_start <- start(summit_used) - new_start
-    summit_right <- new_end - start(summit_used)
-    return(c("chr" = as.character(seqnames(summit_used)), "start" = new_start, "end" = new_end, "summit" = start(summit_used), "peakname" = summit_used$summit_peakname, "width" = width, "summit_start_dist" = summit_start, "summit_end_dist" = summit_right))
+    if(summit){
+      summit_start <- start(summit_used) - new_start
+      summit_right <- new_end - start(summit_used)
+      return(c("chr" = as.character(seqnames(summit_used)), "start" = new_start, "end" = new_end,  "peakname" = peakname,"width" = width, "summit" = start(summit_used),  "summit_start_dist" = summit_start, "summit_end_dist" = summit_right))
+    } else{
+      return(c("chr" = as.character(seqnames(fragments[1])), "start" = new_start, "end" = new_end, "peakname" = peakname, "width" = width))
+    }
   }
   
+
   if(length(fragments) == 1){
-    final <- as.data.frame(t(get_length(1,1))) %>% 
-      mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len & as.numeric(summit_start_dist) >= PROTECT_DIST & as.numeric(summit_end_dist) >= PROTECT_DIST)
+    if(summit){
+      final <- as.data.frame(t(get_length(1,1))) %>% 
+        mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len & as.numeric(summit_start_dist) >= PROTECT_DIST & as.numeric(summit_end_dist) >= PROTECT_DIST)
+    } else{
+      final <- as.data.frame(t(get_length(1,1))) %>% 
+        mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len)
+    }
   } else{
     all_combs <- as.data.frame(t(combn(1:length(fragments), 2))) %>% 
       setNames(c("left","right")) %>% 
       filter(left <= start_index & right >= start_index) %>% 
       add_row(left = start_index, right = start_index)
     
-    out_matrix <- as.data.frame(t(apply(all_combs, 1, function(x) get_length(x[1],x[2])))) %>% 
-      mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len & as.numeric(summit_start_dist) >= PROTECT_DIST & as.numeric(summit_end_dist) >= PROTECT_DIST)
+    if(summit){
+      out_matrix <- as.data.frame(t(apply(all_combs, 1, function(x) get_length(x[1],x[2])))) %>% 
+        mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len & as.numeric(summit_start_dist) >= PROTECT_DIST & as.numeric(summit_end_dist) >= PROTECT_DIST)
+    }else{
+      out_matrix <- as.data.frame(t(apply(all_combs, 1, function(x) get_length(x[1],x[2])))) %>% 
+        mutate(filter = as.numeric(width) >= min_len & as.numeric(width) <= max_len)  
+    }
     
     # pick the best match, 
     final <- out_matrix %>% 
@@ -135,19 +171,54 @@ chain_ortho_region <- function(summit_used){
         filter(width == max(width))
     }
   }
+
+  if(!"summit" %in% colnames(final)){
+    final[, c("summit","summit_start_dist","summit_end_dist")] <- "."
+  }
   final$ori_width <- width
-  return(final)
+  final <- final %>% 
+    dplyr::select(chr, start, end, summit, peakname, ori_width, width, summit_start_dist, summit_end_dist, filter)
+  if(final$filter){
+    # if the chained region passed cutoff, return all actual fragments for overlapping with peaks
+    final_range <- GRanges(final$chr, IRanges(as.numeric(final$start), as.numeric(final$end)))
+    out_fragments <- as.data.frame(subsetByOverlaps(fragments, final_range))[,1:3]
+    out_fragments$peakname <- peakname
+  } else{
+    out_fragments <- NULL
+  }
+  
+  return(list(final, out_fragments))
 }
 
+temp1 <- mclapply(1:nrow(summits), function(x) chain_ortho_region(summits[x,]), mc.cores = args$threads)
+ortho_regions <- do.call(rbind, lapply(temp1, "[[",1))
+ortho_fragments <- do.call(rbind, lapply(temp1, "[[",2))
 
-ortho_regions <- do.call(rbind, mclapply(1:nrow(summits), function(x) chain_ortho_region(summits[x,]), mc.cores = args$threads))
+targets_no_summits_gr <- makeGRangesFromDataFrame(subset(targets, !mapped_peakname %in% summits$summit_peakname) %>% unite(new_peakname, mapped_peakname, seqnames, sep = "-", remove = F), keep.extra.columns = T)
+
+targets_no_summits_gr_list <- split(targets_no_summits_gr, factor(targets_no_summits_gr$new_peakname))
+
+temp2 <- mclapply(names(targets_no_summits_gr_list), function(x) chain_ortho_region(targets_no_summits_gr_list[[x]], summit = F), mc.cores = args$threads)
+ortho_regions_summit_notMapped <- do.call(rbind, lapply(temp2, "[[",1))
+ortho_fragments_summit_notMapped <- do.call(rbind, lapply(temp2, "[[",2))
+#save.image("test.RData")
+
+#ortho_regions_summit_notMapped <- lapply(names(targets_no_summits_gr_list), function(x) chain_ortho_region(targets_no_summits_gr_list[[x]], summit = F))
+
 
 #saveRDS(ortho_regions, paste0(oFile, ".rds"))
 
 #ortho_regions <- do.call(rbind, mclapply(1:100, function(x) chain_ortho_region(summits[x,]), mc.cores = 2))
 
 #ortho_regions <- lapply(1:nrow(summits), function(x) chain_ortho_region(summits[x,]))
-ortho_regions <- dplyr::select(ortho_regions, chr, start, end, summit, peakname, ori_width, width, summit_start_dist, summit_end_dist, filter)
+#ortho_regions <- dplyr::select(ortho_regions, chr, start, end, summit, peakname, ori_width, width, summit_start_dist, summit_end_dist, filter)
 
-write.table(subset(ortho_regions, filter == TRUE) %>% dplyr::select(-filter), file = oFile, sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(subset(ortho_regions, filter == FALSE) %>% dplyr::select(-filter), file = paste0(oFile,".failed"), sep = "\t", row.names = F, col.names = F, quote = F)
+out <- rbind(subset(ortho_regions, filter == TRUE) %>% dplyr::select(-filter),
+             subset(ortho_regions_summit_notMapped, filter == TRUE) %>% dplyr::select(-filter))
+failed <- rbind(subset(ortho_regions, filter == FALSE) %>% dplyr::select(-filter),
+                subset(ortho_regions_summit_notMapped, filter == FALSE) %>% dplyr::select(-filter))
+out_fragments <- rbind(ortho_fragments, ortho_fragments_summit_notMapped)
+write.table(out_fragments, gsub(".bed","_fragments.bed",oFile), sep = "\t", col.names = F, row.names = F, quote = F)
+
+write.table(out, file = oFile, sep = "\t", row.names = F, col.names = F, quote = F)
+write.table(failed, file = paste0(oFile,".failed"), sep = "\t", row.names = F, col.names = F, quote = F)
