@@ -40,6 +40,8 @@ option_list <- list(
   make_option(c("-f", "--factor"),  
                 help="The TF/factor being analyzed"),
   make_option(c("-m","--maxmin"), default = "0:1", help="Maxgap:Mininum overlap between orthologous regions and peaks, in bp [default %(default)s]"),
+  make_option(c("--ol_perc"), type = "integer", default = 1, help = "minimum percentage of peaks overlapping orthologs regions, default to 10"),
+  make_option(c("--ol_bp"), type = "integer", default = 1, help = "minimum number of bps of peaks overlapping orthologs regions, default to 20"),
   make_option(c("-s", "--stitchbp"),type="integer", default=2, 
               help="Stitching orthologous regions within how many bps [default %(default)s]"),
   make_option("--mode", default = "L", help= "matchType: one of L|P|S (P by default) for Legacy, Permissive, or Strict matching"),
@@ -54,12 +56,17 @@ option_list <- list(
 opt_parser <- OptionParser(option_list=option_list)
 args <- parse_args(opt_parser)
 
-
+# get arguments
 input_file = args$`input-file`
 tf = args$factor
 stitchbp = args$stitchbp ## Compara often reports regions with small gaps (1bp). Regions separated by <= stitchbp will be merged
-maxgap = as.numeric(unlist(strsplit(args$maxmin, ":"))[1])
+maxgap = as.numeric(unlist(strsplit(args$maxmin, ":"))[1]) 
 minovl = as.numeric(unlist(strsplit(args$maxmin, ":"))[2])
+
+OL_PERC_CUTOFF = as.numeric(args$ol_perc)
+OL_BP_CUTOFF = as.numeric(args$ol_bp)
+
+
 
 threads = args$threads
 
@@ -146,6 +153,7 @@ find_union <- function(x, y){
 }
 
 regions_to_grlist_hal <- function(region_df, label){
+  # function to parse hal liftover + chain output results and summarize 
   region_gr <- makeGRangesFromDataFrame(region_df, keep.extra.columns = T)
   # split into list by anchor peak and stitch regions next to each other
   region_gr_list <- GenomicRanges::reduce(split(region_gr, region_gr$anchor_oriPeak, drop = F), min.gapwidth = stitchbp)
@@ -199,6 +207,26 @@ regions_to_grlist_compara <- function(region_df){
   return(list("ortho_regions" = region_gr_list, "out" = out))
 }
 
+# overlap by peak percentage 
+ol_by_perc <- function(glist, gr, ...){
+  # expects the input to be a granges list and a grange object
+  # calculates the percentage respective to the grange object
+  
+  # find overlaps
+  ol <- findOverlaps(glist, gr,...)
+  # subset for overlapping pairs
+  glist_1 <- glist[from(ol)]
+  gr_1 <- gr[to(ol)]
+  # pair intersect
+  inter <- pintersect(glist_1, gr_1, drop.nohit.ranges = T)
+  # calculating overlapping percentage
+  ol_perc <- round(100*sum(width(inter))/width(gr_1),2)
+  # return as data frame
+  ol_df <- as.data.frame(ol)
+  ol_df$ol_perc <- ol_perc
+  ol_df$ol_bp <- sum(width(inter))
+  return(ol_df)
+}
 
 # Get a list of GRanges for original peaks --------------------------------
 
@@ -221,8 +249,8 @@ original_peaks <- lapply(species_list, function(anchor_species){ ## Read in orig
 })
 names(original_peaks) <- species_list
 
-# Get a list of compara results.-------------------------------------------------------------------------
-# For each species, compara results for other species are stored as lists of GrangesList, which allows multiple hits to be stored. 
+# Get a list of comparative results.-------------------------------------------------------------------------
+# For each species, comparative analysis results for other species are stored as lists of GrangesList, which allows multiple hits to be stored. 
 # Meanwhile, the EPO outputs are classified into :
 # X : EPO returned NA
 # D : EPO returned a region of 0 width
@@ -322,7 +350,9 @@ names(lifted_list) <- species_list
 
 # Overlap orthologous regions and peaks -------------------------------------------------------------
 
-match_pair_species <- function(anchor_species, query_species){
+match_pair_species <- function(anchor_species, query_species, ol_perc_cutoff = 1, ol_bp_cutoff = 1){
+  # function to overlap orthologous region of one species with peaks from the other species 
+  
   print(paste("Matching regions between: ", anchor_species, query_species))
   
   anchor_species_ori_peaks <- original_peaks[[anchor_species]]
@@ -332,21 +362,28 @@ match_pair_species <- function(anchor_species, query_species){
   query_species_compara_regions <- lifted_list[[query_species]][[anchor_species]]$ortho_regions
   
   # overlaps between anchor species lifted to query, and query peaks
-  anchor_lift2_other <- findOverlaps(anchor_species_compara_regions, query_species_ori_peaks, maxgap=maxgap, minoverlap=minovl)
+  # filter based on peak overlapping percent and #bps 
+
+  #anchor_lift2_other <- findOverlaps(anchor_species_compara_regions, query_species_ori_peaks, maxgap=maxgap, minoverlap=minovl)
+  anchor_lift2_other <- ol_by_perc(anchor_species_compara_regions, query_species_ori_peaks, maxgap=maxgap, minoverlap=minovl) %>% 
+    filter(ol_perc >= ol_perc_cutoff, ol_bp >= ol_bp_cutoff)
   
   # overlaps between query species lifted to anchor, and anchor peaks
-  other_lift2_anchor <- findOverlaps(anchor_species_ori_peaks, query_species_compara_regions, maxgap=maxgap, minoverlap=minovl)
-  
+  #other_lift2_anchor <- findOverlaps(anchor_species_ori_peaks, query_species_compara_regions, maxgap=maxgap, minoverlap=minovl)
+  other_lift2_anchor <- ol_by_perc(query_species_compara_regions, anchor_species_ori_peaks,maxgap=maxgap, minoverlap=minovl) %>% 
+    filter(ol_perc >= ol_perc_cutoff, ol_bp >= ol_bp_cutoff)
+
   # collect overlap results per peak
   # from the 'anchor_lift2_others' perspective
-  con_from_anchor <- data.frame(anchor_peak_from_anchor = names(anchor_species_compara_regions)[from(anchor_lift2_other)],
-                                query_peak_from_anchor = query_species_ori_peaks$oriPeak[to(anchor_lift2_other)]) %>% group_by(anchor_peak_from_anchor) %>% 
+  con_from_anchor <- data.frame(anchor_peak_from_anchor = names(anchor_species_compara_regions)[anchor_lift2_other$queryHits],
+                                query_peak_from_anchor = query_species_ori_peaks$oriPeak[anchor_lift2_other$subjectHits]) %>% 
+    group_by(anchor_peak_from_anchor) %>% 
     summarise(query_peaks_from_anchor = paste(sort(unique(query_peak_from_anchor)), collapse = ";"),
               n_from_anchor = n())
   
   # from the 'query lifted2 anchor' perspective 
-  con_from_query <- data.frame(anchor_peak_from_query = anchor_species_ori_peaks$oriPeak[from(other_lift2_anchor)],
-                               query_peak_from_query = names(query_species_compara_regions)[to(other_lift2_anchor)]) %>% group_by(anchor_peak_from_query) %>% 
+  con_from_query <- data.frame(anchor_peak_from_query = anchor_species_ori_peaks$oriPeak[other_lift2_anchor$subjectHits],
+                               query_peak_from_query = names(query_species_compara_regions)[other_lift2_anchor$queryHits]) %>% group_by(anchor_peak_from_query) %>% 
     summarise(query_peaks_from_query = paste(sort(unique(query_peak_from_query)), collapse = ";"),                               n_from_query = n())
   
   # merge results with anchor species original peaks 
@@ -378,16 +415,15 @@ match_pair_species <- function(anchor_species, query_species){
   }
   
   # construct the string encoding conservation status
-  
  if(alignment_type == "hal"|alignment_type == "ucsc"){
    # if based on hal alignment, initiate an empty string. Peaks with ortho region in query species are labeled with 0, without ortho regions: X
    conserved_pks$out <- "X"
-   conserved_pks$out[conserved_pks$oriPeak %in% names(lifted_list[[anchor_species]][[query_species]]$ortho_regions)] <- "0"
-   conserved_pks$out[conserved_pks[,para_col_name] >=1] <- "1"
+   conserved_pks$out[conserved_pks$oriPeak %in% names(anchor_species_compara_regions)] <- "0"
+   conserved_pks$out[!is.na(conserved_pks[, query_species])] <- "1"
    colnames(conserved_pks)[colnames(conserved_pks) == "out"] <- paste0(query_species, "_conStatus")
   # species_con_out <- conserved_pks
  } else if(alignment_type == "compara"){
-   # For the compara output summary of anchor species projected to other species, saving only X and Gs, and set everything else to 0, meaning EPO alignment found 
+   # For the compara output summary of anchor species projected to other species, saving only X and Gs, and set everything else to 0, meaning sequence is in EPO but peak conservation is not found 
    #out <- lifted_list[[anchor_species]][[query_species]]$out
    out <- lifted_list[[anchor_species]][[query_species]]$out
    out[!out %in% c("X", "G")] <- "0"
@@ -396,8 +432,8 @@ match_pair_species <- function(anchor_species, query_species){
    out[temp] <- "1"
    
    conserved_pks[, paste0(query_species, "_conStatus")] <- out[conserved_pks$oriPeak]
-
  }
+  print("matching done")
   return(conserved_pks)
 }
 
@@ -411,7 +447,8 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
     other_species_list <- species_list
   }
   # process each "other species"
-  match_one_species <- mclapply(other_species_list, function(query_species) match_pair_species(anchor_species, query_species), mc.cores = threads)
+  match_one_species <- mclapply(other_species_list, function(query_species) try(match_pair_species(anchor_species, query_species, ol_perc_cutoff = OL_PERC_CUTOFF, ol_bp_cutoff = OL_BP_CUTOFF)), mc.cores = threads)
+  # merge outputs for each species and format 
   match_one_species_out <- match_one_species %>% 
     purrr::reduce(left_join, by = "oriPeak") %>% 
     unite("conservation", ends_with("_conStatus"), sep = "") %>% 
@@ -424,7 +461,7 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
   }
   
   write.table(x=match_one_species_out,
-              file=paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_",alignment_type,args$label,"_",matchType, ".txt"),
+              file=paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_", alignment_type,"_", args$label,"_",matchType, ".txt"),
               row.names=F, quote=F, sep="\t")
   
   return(match_one_species_out)
@@ -432,4 +469,4 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
 names(compara_matched_list) <- species_list
 
 # Save R data
-save.image(paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type,args$label,"_", matchType, "_peakConservation.RData"))
+save.image(paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type, "_", args$label,"_", matchType, "_peakConservation.RData"))
