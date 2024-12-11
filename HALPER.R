@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# implementes HALPER method for extending hal mapped summits
+# implements HALPER method for extending hal mapped summits
 
 suppressPackageStartupMessages(library(GenomicRanges))
 suppressPackageStartupMessages(library(tidyverse))
@@ -55,19 +55,20 @@ PROTECT_DIST <- args$protect_dist
 # PROTECT_DIST <- 25
 
 # read in files
-summits <- read.table(sFile, sep = "\t")[,1:4] %>% setNames(c("seqnames","start","end","summit_peakname"))
-targets <- read.table(tFile, sep = "\t", col.names = c("seqnames","start","end","mapped_peakname"))
-peaks <- read.table(qFile, sep = "\t", col.names = c("seqnames","start","end","peakname"))
+summits <- read.table(sFile, sep = "\t")[,1:4] %>% setNames(c("seqnames","start","end","summit_peakname")) # lifted over summits
+targets <- read.table(tFile, sep = "\t", col.names = c("seqnames","start","end","mapped_peakname")) # lifted over peaks
+peaks <- read.table(qFile, sep = "\t", col.names = c("seqnames","start","end","peakname")) # original peaks
 
+# get the width of the original peaks
 peak_width <- peaks %>% 
   mutate(width = end - start) %>% 
   dplyr::select(peakname, width) %>% 
   deframe()
 
+# convert regions to granges 
 summits_gr <- makeGRangesFromDataFrame(summits, keep.extra.columns = T)
 targets_gr <- makeGRangesFromDataFrame(targets, keep.extra.columns = T)
 targets_gr_list <- split(targets_gr, factor(targets_gr$mapped_peakname))
-
 
 
 # overlap summits and targets -- not necessary
@@ -80,7 +81,7 @@ targets_gr_list <- split(targets_gr, factor(targets_gr$mapped_peakname))
 # go through summit regions one by one
 
 chain_ortho_region <- function(peak_used, summit = TRUE){
-  # if its summit, input 'peak_used' is a line from mapped summit file; if 
+  # if its summit, input 'peak_used' is a line from mapped summit file; else input is a line from mapped peaks 
   if(summit){
     peakname <- peak_used$summit_peakname
   } else{
@@ -218,7 +219,10 @@ out <- rbind(subset(ortho_regions, filter == TRUE) %>% dplyr::select(-filter),
 failed <- rbind(subset(ortho_regions, filter == FALSE) %>% dplyr::select(-filter),
                 subset(ortho_regions_summit_notMapped, filter == FALSE) %>% dplyr::select(-filter))
 out_fragments <- rbind(ortho_fragments, ortho_fragments_summit_notMapped)
-write.table(out_fragments, gsub(".bed","_fragments.bed",oFile), sep = "\t", col.names = F, row.names = F, quote = F)
 
-write.table(out, file = oFile, sep = "\t", row.names = F, col.names = F, quote = F)
-write.table(failed, file = paste0(oFile,".failed"), sep = "\t", row.names = F, col.names = F, quote = F)
+suffix <- unlist(strsplit(oFile, "\\."))[-1]
+write.table(out_fragments, gsub(paste0(".", suffix),"_fragments.bed",oFile), sep = "\t", col.names = F, row.names = F, quote = F) # output overlapping fragments
+
+write.table(out, file = oFile, sep = "\t", row.names = F, col.names = F, quote = F) # output chained regions
+
+write.table(failed, file = paste0(oFile,".failed"), sep = "\t", row.names = F, col.names = F, quote = F) # output failed regions 
