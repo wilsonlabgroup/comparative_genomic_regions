@@ -41,9 +41,17 @@ def gen_summit_file(input):
             print("Assuming narrowPeak file, using the 10th column as summit position", file = sys.stderr)
             awk_cmd = f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, $2+$10, $2+$10+1, $4, $5, $6}}\' {input} > {summit_file}'
             
+        elif n_cols == 3:
+            # if 3 columns, take the middle point as summit and merge peak coord as peak name
+            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
+            awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $1":"$2"-"$3}}\' {input} > {summit_file}'
+        elif n_cols == 4:
+            # if 4 columns, keep the forth column as peak name
+            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
+            awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4}}\' {input} > {summit_file}'
         else:
             # otherwise, take the middle point as summit
-            print("No summits found, taking the middle point as the summits.", fiile = sys.stderr)
+            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
             awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4, $5, $6}}\' {input} > {summit_file}'
 
         run(awk_cmd, shell = True) 
@@ -123,6 +131,14 @@ if __name__ == '__main__':
     if args.submit:
         print(halper_cmd + "\n")
     else:
-        print(peak_liftover_cmd + "\n", summit_liftover_cmd + "\n", halper_cmd + "\n")
+        hallift_cmd_file = os.path.join(output_dir, OUTPUT_LABEL + "_halLiftover_commands")
+        halper_cmd_file = os.path.join(output_dir, OUTPUT_LABEL + "_halper_command")
+
+        with open(hallift_cmd_file, "w") as f:
+            f.writelines([peak_liftover_cmd + "\n",summit_liftover_cmd + "\n"])
+
+        with open(halper_cmd_file, "w") as f:
+            f.writelines(halper_cmd + "\n")
+        #print(peak_liftover_cmd + "\n", summit_liftover_cmd + "\n", halper_cmd + "\n")
 
     
