@@ -27,6 +27,7 @@ See help messages for other options.
 - `{factor}_{method}_qsub_commands`: halLiftover/ucsc liftover commands. Run these commands first.
 - `TF_hal_Rscript_command`: run this file after the liftover is finished
 
+The specific steps are explained below:
 
 ## Getting orthologous regions
 
