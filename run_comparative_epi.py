@@ -74,10 +74,9 @@ def reformat_peaks(line, summit = True):
 
     if summit:
         new_summit_file = os.path.join(OUTDIR, factor, "peaks", f"{factor}_{species}_summits.bed")
-        print(summit_file, new_summit_file)
     # process summit file
         if os.path.isfile(os.path.expanduser(summit_file)):
-            print("use summit file")
+            #print("use summit file")
             # if summit file exists
             summits = pd.read_table(summit_file, header=None)
             if summits.shape[1] == 3:
@@ -86,8 +85,8 @@ def reformat_peaks(line, summit = True):
             else:
                 # use 4th column as peakname
                 # check if peaknames are consistent with names in peak file
-                peaknames = peaks_new.iloc[:,3]
-                summit_peaknames = summits.iloc[:,3]
+                peaknames = peaks_new.iloc[:,3].sort_values()
+                summit_peaknames = summits.iloc[:,3].sort_values()
                 res = peaknames == summit_peaknames
                 if res.all():
                     summits_new = summits.iloc[:,0:3]
@@ -133,12 +132,12 @@ def gen_liftover_cmd(s_pair, label):
 def gen_hal_cmd(s_pair):
     # given two species names and hal file, generate hal liftover commands
     s1, s2 = s_pair
-    hal_out_file = gen_ortho_out_file(s_pair, ortho_method = "hal-raw")
+    hal_out_file = gen_ortho_out_file(s_pair, ortho_method = "hal_raw")
     s1_peak = species_peak_dict[s1]
     hal_cmd = f'halLiftover {args.hal} {s1} {s1_peak} {s2} {hal_out_file}'
     if args.summits:
         s1_summit = species_summit_dict[s1]
-        hal_summit_out_file = gen_ortho_out_file(s_pair, ortho_method="halLift_summits")
+        hal_summit_out_file = gen_ortho_out_file(s_pair, ortho_method="hal_summits")
         hal_cmd2 = f'halLiftover {args.hal} {s1} {s1_peak} {s2} {hal_summit_out_file}'
         return(hal_cmd + "\n" + hal_cmd2)
     else:
@@ -147,14 +146,14 @@ def gen_hal_cmd(s_pair):
 def gen_fragMerger_cmd(s_pair, label):
     # given two species names and hal file, generate fragment merger commands
     s1 = s_pair[0]
-    hal_out_file = gen_ortho_out_file(s_pair, ortho_method = "hal-raw")
+    hal_out_file = gen_ortho_out_file(s_pair, ortho_method = "hal_raw")
     merger_out_file = gen_ortho_out_file(s_pair, ortho_method = label)
     s1_peak = species_peak_dict[s1]
     if args.summits:
-        s1_summit = species_summit_dict[s1]
-        merger_cmd = f'fragment_merger.R -q {s1_peak} -t {hal_out_file} -o {merger_out_file} -s {s1_summit} --min_frac {args.min_frac} --max_frac {args.max_frac}'
+        s1_lifted_summit = gen_ortho_out_file(s_pair, ortho_method="hal_summits")
+        merger_cmd = f'halLiftover_fragments_merger.R -q {s1_peak} -t {hal_out_file} -o {merger_out_file} -s {s1_lifted_summit} --min_frac {args.min_frac} --max_frac {args.max_frac}'
     else:
-        merger_cmd = f'fragment_merger.R -q {s1_peak} -t {hal_out_file} -o {merger_out_file} --min_frac {args.min_frac} --max_frac {args.max_frac}'
+        merger_cmd = f'halLiftover_fragments_merger.R -q {s1_peak} -t {hal_out_file} -o {merger_out_file} --min_frac {args.min_frac} --max_frac {args.max_frac}'
     return(merger_cmd)
 
 def main():
