@@ -21,32 +21,30 @@ from itertools import permutations
 
 
 def gen_summit_file(input, output):
-    if not os.path.isfile(os.path.expanduser(output)):
-        # if summit file does not already exist
-        print("Generating summit file", file = sys.stderr)
-        # read one line and count number of columns
-        with open(input) as f:
-            line = f.readline().split("\t")
-            n_cols = len(line)
-        if n_cols == 10:
-            # assumes its narrowPeak format, 10th column is summit position
-            print("Assuming narrowPeak file, using the 10th column as summit position", file = sys.stderr)
-            awk_cmd = f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, $2+$10, $2+$10+1, $4, $5, $6}}\' {input} > {output}'
-            
-        elif n_cols == 3:
-            # if 3 columns, take the middle point as summit and merge peak coord as peak name
-            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
-            awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $1":"$2"-"$3}}\' {input} > {output}'
-        elif n_cols == 4:
-            # if 4 columns, keep the forth column as peak name
-            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
-            awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4}}\' {input} > {output}'
-        else:
-            # otherwise, take the middle point as summit
-            print("No summits found, taking the middle point as the summits.", file = sys.stderr)
-            awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4, $5, $6}}\' {input} > {output}'
+    print("Generating summit file", file = sys.stderr)
+    # read one line and count number of columns
+    with open(input) as f:
+        line = f.readline().split("\t")
+        n_cols = len(line)
+    if n_cols == 10:
+        # assumes its narrowPeak format, 10th column is summit position
+        print("Assuming narrowPeak file, using the 10th column as summit position", file = sys.stderr)
+        awk_cmd = f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, $2+$10, $2+$10+1, $4, $5, $6}}\' {input} > {output}'
+        
+    elif n_cols == 3:
+        # if 3 columns, take the middle point as summit and merge peak coord as peak name
+        print("No summits found, taking the middle point as the summits.", file = sys.stderr)
+        awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $1":"$2"-"$3}}\' {input} > {output}'
+    elif n_cols == 4:
+        # if 4 columns, keep the forth column as peak name
+        print("No summits found, taking the middle point as the summits.", file = sys.stderr)
+        awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4}}\' {input} > {output}'
+    else:
+        # otherwise, take the middle point as summit
+        print("No summits found, taking the middle point as the summits.", file = sys.stderr)
+        awk_cmd =  f'awk \'BEGIN {{FS="\t"; OFS="\t"}} {{print $1, int(($2+$3)/2), int(($2+$3)/2)+1, $4, $5, $6}}\' {input} > {output}'
 
-        run(awk_cmd, shell = True) 
+    run(awk_cmd, shell = True) 
     return None
 
 
@@ -89,7 +87,7 @@ def reformat_peaks(line, summit = True):
                 summit_peaknames = summits.iloc[:,3].sort_values()
                 res = peaknames == summit_peaknames
                 if res.all():
-                    summits_new = summits.iloc[:,0:3]
+                    summits_new = summits.iloc[:,0:4]
                     summits_new.to_csv(new_summit_file, sep = "\t", header = False, index = False)
                 else:
                     print(f"peak names don't match between summit {summit_file} and peak file {peak_file}")
@@ -236,7 +234,7 @@ def main():
     r_input["peaks"] = [species_peak_dict[x] for x in r_input[0]]
     r_input.to_csv(R_input, sep = "\t", header = False, index = False)
 
-    R_cmd = f'./process_comparative_output.R -i {R_input} -f {FACTOR} --mode S -t 4 --type {args.method}'
+    R_cmd = f'process_comparative_output.R -i {R_input} -f {FACTOR} --mode S -t 4 --type {args.method}'
     #print(R_cmd)
     
     with open(R_cmd_file,'a') as file:
