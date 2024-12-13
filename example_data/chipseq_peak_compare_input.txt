@@ -1,0 +1,3 @@
+bos_taurus	TF	~/mdwilson/huayun/scripts/hal_liftover/example_data/cow_chipseq_peaks.narrowPeak	~/mdwilson/huayun/scripts/hal_liftover/example_data/cow_chipseq_peaks.summit
+homo_sapiens	TF	~/mdwilson/huayun/scripts/hal_liftover/example_data/human_chipseq_peaks.narrowPeak	~/mdwilson/huayun/scripts/hal_liftover/example_data/human_chipseq_peaks.summit
+mus_musculus	TF	~/mdwilson/huayun/scripts/hal_liftover/example_data/mouse_chipseq_peaks.narrowPeak	~/mdwilson/huayun/scripts/hal_liftover/example_data/mouse_chipseq_peaks.summit
