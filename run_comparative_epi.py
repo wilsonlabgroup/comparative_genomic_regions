@@ -138,7 +138,7 @@ def gen_hal_cmd(s_pair):
     if args.summits:
         s1_summit = species_summit_dict[s1]
         hal_summit_out_file = gen_ortho_out_file(s_pair, ortho_method="hal_summits")
-        hal_cmd2 = f'halLiftover {args.hal} {s1} {s1_peak} {s2} {hal_summit_out_file}'
+        hal_cmd2 = f'halLiftover {args.hal} {s1} {s1_summit} {s2} {hal_summit_out_file}'
         return(hal_cmd + "\n" + hal_cmd2)
     else:
         return(hal_cmd)
