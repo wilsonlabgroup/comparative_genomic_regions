@@ -124,6 +124,7 @@ if(alignment_type == "compara"){
 
 species_list <- unique(file_table$target_species)
 
+outdir <- dirname(input_file)
 
 # for testing
 # file_table$lifted_res <- gsub("home/huayun|hpf/largeprojects","mnt", file_table$lifted_res)
@@ -461,7 +462,7 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
   }
   
   write.table(x=match_one_species_out,
-              file=paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_", alignment_type,"_", args$label,"_",matchType, ".txt"),
+              file=file.path(outdir,paste0(tf,"_max",maxgap,"min",minovl,"_peakConservation_", anchor_species,"_", alignment_type,"_", args$label,"_",matchType, ".txt")),
               row.names=F, quote=F, sep="\t")
   
   return(match_one_species_out)
@@ -469,4 +470,4 @@ compara_matched_list <- mclapply(species_list, function(anchor_species){
 names(compara_matched_list) <- species_list
 
 # Save R data
-save.image(paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type, "_", args$label,"_", matchType, "_peakConservation.RData"))
+save.image(file.path(outdir,paste0(tf, "_max", maxgap, "min", minovl, "_",alignment_type, "_", args$label,"_", matchType, "_peakConservation.RData")))

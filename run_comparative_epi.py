@@ -234,7 +234,7 @@ def main():
     r_input["peaks"] = [species_peak_dict[x] for x in r_input[0]]
     r_input.to_csv(R_input, sep = "\t", header = False, index = False)
 
-    R_cmd = f'process_comparative_output.R -i {R_input} -f {FACTOR} --mode S -t 4 --type {args.method}'
+    R_cmd = f'process_comparative_output.R -i {R_input} -f {FACTOR} --mode S -t 4 --type ucsc'
     #print(R_cmd)
     
     with open(R_cmd_file,'a') as file:

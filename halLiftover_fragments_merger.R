@@ -20,7 +20,7 @@ option_list <- list(
   make_option("--min_frac", default = 0.75, help = "Minimum fraction of clustered regions/peaks width, Default 25 (%). If >10, treated as minumum length (bp)"),
   #make_option("--max_len", help = "Maximum length of clustered regions/peaks width"),
   #make_option("--min_len", default = 75, help = "Minimum length of clustered regions/peaks width"),
-  make_option("--gap", default = 50, help = "Gap width. Fragments within distance < gap width will be merged")
+  make_option("--gap", default = 50, help = "Gap width. Fragments within distance < gap width will be merged. Default 50")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
